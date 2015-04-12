@@ -90,14 +90,9 @@ int setEntity(char* Name,int doubleQuantity, int doubleListX, int doubleListY,
 
 //function pointer for functions modifying doubleData
 typedef void(*modifierDouble)(double* array, int index, double operand);
+//function pointer for functions modifying intData
+typedef void(*modifierInt)(int* array, int index, int operand);
 
-__device__ int strcmp(const char *s1, const char *s2)
-{
-	for (; *s1 == *s2; s1++, s2++)
-		if (*s1 == '\0')
-			return 0;
-	return ((*(unsigned char *)s1 < *(unsigned char *)s2) ? -1 : +1);
-}
 
 /////////////////////////////////////////////////////////////////Double Section
 
@@ -144,6 +139,24 @@ __device__ void mulInt(int* array, int index, int operand){
 __device__ void divInt(int* array, int index, int operand){
 	array[index] /= operand;
 }
+__device__ modifierInt io_addInt = addInt;
+__device__ modifierInt io_subInt = subInt;
+__device__ modifierInt io_mulInt = mulInt;
+__device__ modifierInt io_divInt = divInt;
+
+void initIntFunctions(modifierInt* io_modifierInt){
+	cudaMemcpyFromSymbol(&io_modifierInt[0], io_addInt, sizeof(modifierInt));
+	cudaMemcpyFromSymbol(&io_modifierInt[1], io_subInt, sizeof(modifierInt));
+	cudaMemcpyFromSymbol(&io_modifierInt[2], io_mulInt, sizeof(modifierInt));
+	cudaMemcpyFromSymbol(&io_modifierInt[3], io_divInt, sizeof(modifierInt));
+}
+__device__ int strcmp(const char *s1, const char *s2)
+{
+	for (; *s1 == *s2; s1++, s2++)
+		if (*s1 == '\0')
+			return 0;
+	return ((*(unsigned char *)s1 < *(unsigned char *)s2) ? -1 : +1);
+}
 
 /*
 This is the function. I mean, THE function. It simulates and does the core job. For it, the pointers declared on top are required and an instruction set.
@@ -161,7 +174,7 @@ The instruction set is what makes this code programmble. Here's the legend for t
 __global__ void ultimateCoder(
 	char** name,double** doubleData,int** intData,
 	char* io_name, int io_morphCode, int io_functionCode, int io_index1, int io_index2, double io_operand, int isMemory, int entityIndex, int memIndex1, int memIndex2,
-	modifierDouble* io_modierDouble){
+	modifierDouble* io_modifierDouble, modifierInt* io_modifierInt){
 	
 	int index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (!strcmp(io_name, name[index])){
@@ -184,29 +197,62 @@ __global__ void ultimateCoder(
 				//io_operand = doubleListData[entityIndex][memIndex1][memIndex2];
 				break;
 			}
-			io_modierDouble[io_functionCode](doubleData[index], io_index1, io_operand);
+			io_modifierDouble[io_functionCode](doubleData[index], io_index1, io_operand);
+			break;
+		case 1://Int
+			switch (isMemory)
+			{
+			case 0:
+				break;
+			case 1://operand from Double
+				io_operand = doubleData[entityIndex][memIndex1];
+				break;
+			case 2://operand from DoubleList
+				//io_operand = doubleListData[entityIndex][memIndex1][memIndex2];
+				break;
+			case 3://operand from Int
+				io_operand = intData[entityIndex][memIndex1];
+				break;
+			case 4://operand from IntList
+				//io_operand = intListData[entityIndex][memIndex1][memIndex2];
+				break;
+			}
+			io_modifierInt[io_functionCode](intData[index], io_index1, io_operand);
 			break;
 		}
 	}
 
 }
 
+void execute(char* Name, int io_morphCode, int io_functionCode, int io_index1, 
+	int io_index2, double io_operand, int isMemory, int entityIndex, int memIndex1, int memIndex2){
+
+	modifierDouble* io_modifierDouble;
+	cudaMallocHost((void**)&io_modifierDouble, 4 * sizeof(modifierDouble));
+	initDoubleFunctions(io_modifierDouble);
+
+	modifierInt* io_modifierInt;
+	cudaMallocHost((void**)&io_modifierInt, 4 * sizeof(modifierInt));
+	initIntFunctions(io_modifierInt);
+
+	char* io_name;
+	cudaMallocHost((void**)&io_name, strlen(Name) * sizeof(char));
+	strcpy(io_name, Name);
+
+	ultimateCoder<<<1,total>>>(name, doubleData, intData, io_name, io_morphCode, io_functionCode, io_index1,
+		io_index2, io_operand, isMemory, entityIndex, memIndex1, memIndex2, io_modifierDouble,io_modifierInt);
+	cudaDeviceSynchronize();
+}
+
 int main(){
 	setTotal(2);
 	setEntity("yay",1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1);
 	setEntity("yay2",1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1);
-	doubleData[0][0]= 19;
-	modifierDouble* io_modifierDouble;
-	cudaMallocHost((void**)&io_modifierDouble, 4 * sizeof(modifierDouble));
-	initDoubleFunctions(io_modifierDouble);
-	char* na;
-	cudaMallocHost((void**)&na, 3 * sizeof(char));
-	strcpy(na, "yay2");
-	ultimateCoder <<<1,2>>> (name, doubleData, intData, na, 0, 0, 0, 0, 0, 3, 0, 0, 0, io_modifierDouble);
-	cudaDeviceSynchronize();
-	strcpy(na, "yay");
-	ultimateCoder <<<1,2>>> (name, doubleData, intData, na, 0, 1, 0, 0, 3, 0, 0, 0, 0, io_modifierDouble);
-	cudaDeviceSynchronize();
-	printf("%f %f", doubleData[1][0], doubleData[0][0]);
+	intData[0][0]= 19;
+	
+	execute("yay2", 1, 0, 0, 0, 0, 3, 0, 0, 0);
+	execute("yay", 1, 3, 0, 0, 3, 0, 0, 0, 0);
+
+	printf("%d %d", intData[1][0], intData[0][0]);
 	getch();
 }
