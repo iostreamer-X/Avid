@@ -1,6 +1,7 @@
 #include<cuda_runtime.h>
 #include<stdio.h>
 #include<conio.h>
+#include<string.h>
 #include<iostream>
 
 using namespace std;
@@ -48,8 +49,8 @@ int setEntity(char* Name,int doubleQuantity, int doubleListX, int doubleListY,
 	static int index = 0;
 	if (index < total){
 
-		name[index] = Name;
-
+		cudaMallocHost((void**)&name[index], strlen(Name) * sizeof(char));
+		strcpy(name[index],Name);
 		if (doubleQuantity > 0)
 			cudaMallocHost((void**)&doubleData[index], doubleQuantity*sizeof(double));
 		if (doubleListY > 0){
@@ -102,7 +103,7 @@ __device__ int strcmp(const char *s1, const char *s2)
 
 
 __device__ void addDouble(double* array, int index, double operand){
-	array[index] += operand;	
+	array[index] += operand;
 }
 
 __device__ void subDouble(double* array, int index, double operand){
@@ -154,26 +155,33 @@ The instruction set is what makes this code programmble. Here's the legend for t
 5)io_index2 - same as io_index1 but for 2D arrays.
 6)io_operand - the operand for the function operation.
 7)isMemory - tells if the operand lies in the memory or not and if does then which data structure it lies in.
+8)entityIndex - The entity whose memory should be used as operand
 8)memIndices - the address of that memory operand
 */
 __global__ void ultimateCoder(
 	char** name,double** doubleData,int** intData,
-	char* io_name, int io_morphCode, int io_functionCode, int io_index1, int io_index2, double io_operand, int isMemory, int memIndex1, int memIndex2, int memIndex3,
+	char* io_name, int io_morphCode, int io_functionCode, int io_index1, int io_index2, double io_operand, int isMemory, int entityIndex, int memIndex1, int memIndex2,
 	modifierDouble* io_modierDouble){
 	
 	int index = threadIdx.x + blockIdx.x * blockDim.x;
 	if (!strcmp(io_name, name[index])){
 		switch (io_morphCode){
-		case 0:
+		case 0://Double
 			switch (isMemory)
 			{
 			case 0:
 				break;
-			case 1:
-				io_operand = doubleData[memIndex1][memIndex2];
+			case 1://operand from Int
+				io_operand = intData[entityIndex][memIndex1];
 				break;
-			case 2:
-				io_operand = intData[memIndex1][memIndex2];
+			case 2://operand from IntList
+				//io_operand = intListData[entityIndex][memIndex1][memIndex2];
+				break;
+			case 3://operand from Double
+				io_operand = doubleData[entityIndex][memIndex1];
+				break;
+			case 4://operand from DoubleList
+				//io_operand = doubleListData[entityIndex][memIndex1][memIndex2];
 				break;
 			}
 			io_modierDouble[io_functionCode](doubleData[index], io_index1, io_operand);
@@ -183,17 +191,22 @@ __global__ void ultimateCoder(
 
 }
 
-
 int main(){
 	setTotal(2);
 	setEntity("yay",1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1);
 	setEntity("yay2",1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1);
-	intData[0][0]= 19;
+	doubleData[0][0]= 19;
 	modifierDouble* io_modifierDouble;
 	cudaMallocHost((void**)&io_modifierDouble, 4 * sizeof(modifierDouble));
 	initDoubleFunctions(io_modifierDouble);
-	ultimateCoder <<<1,2>>> (name, doubleData, intData, "yay2", 0, 0, 0, 0, 0, 2, 0, 0, 0, io_modifierDouble);
+	char* na;
+	cudaMallocHost((void**)&na, 3 * sizeof(char));
+	strcpy(na, "yay2");
+	ultimateCoder <<<1,2>>> (name, doubleData, intData, na, 0, 0, 0, 0, 0, 3, 0, 0, 0, io_modifierDouble);
 	cudaDeviceSynchronize();
-	printf("%f",doubleData[1][0]);
+	strcpy(na, "yay");
+	ultimateCoder <<<1,2>>> (name, doubleData, intData, na, 0, 1, 0, 0, 3, 0, 0, 0, 0, io_modifierDouble);
+	cudaDeviceSynchronize();
+	printf("%f %f", doubleData[1][0], doubleData[0][0]);
 	getch();
 }
